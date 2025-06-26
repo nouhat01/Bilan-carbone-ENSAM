@@ -99,7 +99,9 @@ if "afficher_resultats" not in st.session_state:
 if mode == "🧮 Estimer selon le nombre d'étudiants":
     st.markdown("<hr style='border: 1px solid #ccc;'>", unsafe_allow_html=True)
     st.header("📊🧮 Estimation du Bilan Carbone selon le nombre d'étudiants")
-    nb_etudiants = st.number_input("👨‍🎓 Nombre d'étudiants", min_value=1, step=1, value=2000)
+
+    st.number_input("👨‍🎓 Nombre d'étudiants", key="nb_etudiants", min_value=1, value=2000)
+    nb_etudiants = st.session_state.nb_etudiants
 
     emissions_moyennes_par_etudiant = {
         "Transports": 1.0,
@@ -109,12 +111,19 @@ if mode == "🧮 Estimer selon le nombre d'étudiants":
     }
 
     st.subheader("🧾 Estimation poste par poste")
-    total_estime = sum(val * nb_etudiants for val in emissions_moyennes_par_etudiant.values())
+    total_estime = 0
     for poste, val in emissions_moyennes_par_etudiant.items():
-        st.markdown(f"<div class='box'>{poste} : {val * nb_etudiants:.1f} kg CO2e</div>", unsafe_allow_html=True)
+        val_total = val * nb_etudiants
+        affichage = f"{val_total:.2f}" if val_total >= 0.01 else "< 0.01"
+        st.markdown(f"<div class='box'>{poste} : {affichage} kg CO2e</div>", unsafe_allow_html=True)
+        total_estime += val_total
 
-    st.markdown(f"<div class='box'>🧮 Total estimé : {total_estime/1000:.2f} tonnes CO2e/an</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='box'>👤 Moyenne par étudiant : {total_estime/nb_etudiants:.2f} kg CO2e/an/étudiant</div>", unsafe_allow_html=True)
+    total_affiche = f"{total_estime/1000:.2f}" if total_estime >= 10 else f"{total_estime/1000:.3f}"
+    moyenne = total_estime / nb_etudiants
+    moyenne_affichee = f"{moyenne:.2f}" if moyenne >= 0.01 else "< 0.01"
+
+    st.markdown(f"<div class='box'>🧮 Total estimé : {total_affiche} tonnes CO2e/an</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='box'>👤 Moyenne par étudiant : {moyenne_affichee} kg CO2e/an/étudiant</div>", unsafe_allow_html=True)
     st.stop()
 
 st.markdown("<hr style='border: 1px solid #ccc;'>", unsafe_allow_html=True)
@@ -172,10 +181,24 @@ if st.session_state.saisies:
 # Le bloc des résultats, scénarios, et PDF continue ensuite...
 
 
-if st.session_state.afficher_resultats and st.session_state.saisies:
+if st.session_state.afficher_resultats:
+    
+    if not st.session_state.saisies:
+        st.warning("⚠️ Veuillez ajouter au moins une activité avant d’afficher les résultats.")
+        st.stop()
+
     df = pd.DataFrame(st.session_state.saisies)
-    df["Poste"] = df["Poste"].astype(str).str.strip()
+
+    if "Émissions (kg CO2e)" not in df.columns:
+        st.warning("⚠️ Aucune colonne 'Émissions (kg CO2e)' détectée. Veuillez d'abord ajouter des activités.")
+        st.stop()
+
     df["Émissions (kg CO2e)"] = pd.to_numeric(df["Émissions (kg CO2e)"], errors="coerce").fillna(0)
+
+    if df["Émissions (kg CO2e)"].sum() == 0:
+        st.warning("Toutes les émissions sont nulles. Aucune donnée exploitable.")
+        st.stop()
+
     total = df["Émissions (kg CO2e)"].sum()
     par_poste = df.groupby("Poste")["Émissions (kg CO2e)"].sum()
 
@@ -209,23 +232,36 @@ if st.session_state.afficher_resultats and st.session_state.saisies:
                     for s in cat:
                         if s.get("poste") == poste:
                             reductions.append(s)
-        if reductions:
-            st.markdown(f"*{poste}*")
-            for s in reductions:
+
+        if isinstance(reductions, dict):
+            for _, s in reductions.items():
+                if "reduction_pct" not in s:
+                    continue
                 pct = s["reduction_pct"]
                 if isinstance(pct, tuple):
                     gain_min = par_poste[poste] * pct[0] / 100
                     gain_max = par_poste[poste] * pct[1] / 100
-                    reduction_totale_min += gain_min
-                    reduction_totale_max += gain_max
-                    st.markdown(f"- {s['nom']} → gain estimé : entre {gain_min:.1f} et {gain_max:.1f} kg CO2e")
-                    scenarios_affiches.append((poste, s['nom'], gain_min, gain_max))
                 else:
-                    gain = par_poste[poste] * pct / 100
-                    reduction_totale_min += gain
-                    reduction_totale_max += gain
-                    st.markdown(f"- {s['nom']} → gain estimé : {gain:.1f} kg CO2e")
-                    scenarios_affiches.append((poste, s['nom'], gain, gain))
+                    gain_min = gain_max = par_poste[poste] * pct / 100
+                reduction_totale_min += gain_min
+                reduction_totale_max += gain_max
+                st.markdown(f"- {s['nom']} → gain estimé : {gain_min:.1f} à {gain_max:.1f} kg CO2e")
+                scenarios_affiches.append((poste, s['nom'], gain_min, gain_max))
+
+        elif isinstance(reductions, list):
+            for s in reductions:
+                if "reduction_pct" not in s:
+                    continue
+                pct = s["reduction_pct"]
+                if isinstance(pct, tuple):
+                    gain_min = par_poste[poste] * pct[0] / 100
+                    gain_max = par_poste[poste] * pct[1] / 100
+                else:
+                    gain_min = gain_max = par_poste[poste] * pct / 100
+                reduction_totale_min += gain_min
+                reduction_totale_max += gain_max
+                st.markdown(f"- {s['nom']} → gain estimé : {gain_min:.1f} à {gain_max:.1f} kg CO2e")
+                scenarios_affiches.append((poste, s['nom'], gain_min, gain_max))
 
     # === COMPARATIF AVANT / APRÈS ===
     st.subheader("📉⚖️ Comparatif Avant / Après des émissions")
@@ -242,17 +278,22 @@ if st.session_state.afficher_resultats and st.session_state.saisies:
     comparatif_df.set_index("#", inplace=True)
     st.dataframe(comparatif_df)
 
-    st.markdown(f"*Total actuel :* {total/1000:.2f} t CO2e")
-    st.markdown(f"*Total après réduction (optimiste) :* {total_apres_min/1000:.2f} t CO2e")
-    st.markdown(f"*Total après réduction (pessimiste) :* {total_apres_max/1000:.2f} t CO2e")
+    st.markdown(f"Total actuel : {total/1000:.2f} t CO2e")
+    st.markdown(f"Total après réduction (optimiste) : {total_apres_min/1000:.2f} t CO2e")
+    st.markdown(f"Total après réduction (pessimiste) : {total_apres_max/1000:.2f} t CO2e")
+
 
 # === RAPPORT PDF FINAL ===
 if st.button("🧾📄 Générer le rapport PDF complet"):
+    df = pd.DataFrame(st.session_state.saisies)
+    df["Émissions (kg CO2e)"] = pd.to_numeric(df["Émissions (kg CO2e)"], errors="coerce").fillna(0)
+    total = df["Émissions (kg CO2e)"].sum()
+    par_poste = df.groupby("Poste")["Émissions (kg CO2e)"].sum()
     pdf = FPDF()
     pdf.add_page()
 
     if os.path.exists("logo.png"):
-        logo_width = 50
+        logo_width = 70
     page_width = pdf.w - 2 * pdf.l_margin
     logo_x = (page_width - logo_width) / 2 + pdf.l_margin
     pdf.image("logo.png", x=logo_x, y=10, w=logo_width)
@@ -331,6 +372,12 @@ if st.button("🧾📄 Générer le rapport PDF complet"):
             pdf.cell(0, 8, ligne, ln=True)
         except:
             pdf.cell(0, 8, ligne.encode('latin-1', 'replace').decode('latin-1'), ln=True)
+
+    rapport_path = "rapport_bilan_complet.pdf"
+    pdf.output(rapport_path)
+    with open(rapport_path, "rb") as f:
+        st.download_button("📥💾 Télécharger le rapport PDF complet", data=f, file_name=rapport_path, mime="application/pdf")
+
 
     rapport_path = "rapport_bilan_complet.pdf"
     pdf.output(rapport_path)
