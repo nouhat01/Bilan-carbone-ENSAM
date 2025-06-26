@@ -104,10 +104,10 @@ if mode == "🧮 Estimer selon le nombre d'étudiants":
     nb_etudiants = st.session_state.nb_etudiants
 
     emissions_moyennes_par_etudiant = {
-        "Transports": 1.0,
-        "Déchets ménagers": 0.3,
-        "Numérique": 0.2,
-        "Électricité": 1.48
+        "Transports": 339.2,
+        "Déchets ": 10.26,
+        "Ordinateur personnel": 47.16,
+        "Électricité": 57.5
     }
 
     st.subheader("🧾 Estimation poste par poste")
